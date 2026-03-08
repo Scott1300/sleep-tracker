@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Patrick's Sleep Tracker</title>
+    <!-- React & Babel for CDN usage -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #020617; color: #e2e8f0; margin: 0; padding: 0; overflow: hidden; height: 100vh; width: 100vw; }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 30px;
+            width: 30px;
+            border-radius: 50%;
+            background: #6366f1;
+            cursor: pointer;
+            border: 4px solid #1e1b4b;
+        }
+        .prevent-select { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    </style>
+</head>
+<body class="prevent-select">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Custom Inline Icons for maximum reliability
+        const Icon = ({ d, size = 24, fill = "none", strokeWidth = 2, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d={d} />
+            </svg>
+        );
+
+        const MoonIcon = (p) => <Icon {...p} d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />;
+        const SunIcon = (p) => (
+            <svg width={p.size} height={p.size} viewBox="0 0 24 24" fill={p.fill || "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
+                <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+            </svg>
+        );
+        const PlayIcon = (p) => <Icon {...p} d="m7 3 14 9-14 9V3z" />;
+        const SquareIcon = (p) => <Icon {...p} d="M3 3h18v18H3z" />;
+        const SettingsIcon = (p) => <Icon {...p} d="M12.22 2h-.44a2 2 0 0 0-2 2 2 2 0 0 1-2 2 2 2 0 0 0-2 2 2 2 0 0 1-2 2 2 2 0 0 0-2 2v.44a2 2 0 0 0 2 2 2 2 0 0 1 2 2 2 2 0 0 0 2 2 2 2 0 0 1 2 2 2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2 2 2 0 0 1 2-2 2 2 0 0 0 2-2 2 2 0 0 1 2-2 2 2 0 0 0 2-2v-.44a2 2 0 0 0-2-2 2 2 0 0 1-2-2 2 2 0 0 0-2-2 2 2 0 0 1-2-2 2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />;
+        const InfoIcon = (p) => <Icon {...p} d="M12 16h.01M12 8h.01M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />;
+        const LockIcon = (p) => <Icon {...p} d="M19 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2zM7 11V7a5 5 0 0 1 10 0v4" />;
+        const VolumeIcon = (p) => <Icon {...p} d="M11 5 6 9H2v6h4l5 4V5zM19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />;
+        const XIcon = (p) => <Icon {...p} d="M18 6 6 18M6 6l12 12" />;
+
+        const App = () => {
+            const TOTAL_HOURS = 9;
+            const TOTAL_SECONDS = TOTAL_HOURS * 3600;
+
+            const [isActive, setIsActive] = useState(false);
+            const [startTime, setStartTime] = useState(null);
+            const [elapsedSeconds, setElapsedSeconds] = useState(0);
+            const [showConfirmReset, setShowConfirmReset] = useState(false);
+            const [isSpeaking, setIsSpeaking] = useState(false);
+            const [isAdminOpen, setIsAdminOpen] = useState(false);
+            const [isLocked, setIsLocked] = useState(true);
+            const [debugProgress, setDebugProgress] = useState(0);
+            const [unlockProgress, setUnlockProgress] = useState(0);
+            const longPressTimer = useRef(null);
+
+            const getTomorrowDay = () => {
+                const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                return days[tomorrow.getDay()];
+            };
+
+            const speakMessage = (text) => {
+                return new Promise((resolve) => {
+                    if (!window.speechSynthesis) return resolve();
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    const voices = window.speechSynthesis.getVoices();
+                    const preferredVoice = voices.find(v => v.name.includes('Samantha') || v.name.includes('Karen') || v.lang === 'en-US');
+                    if (preferredVoice) utterance.voice = preferredVoice;
+                    utterance.pitch = 1.1;
+                    utterance.rate = 0.85;
+                    utterance.onstart = () => setIsSpeaking(true);
+                    utterance.onend = () => { setIsSpeaking(false); resolve(); };
+                    window.speechSynthesis.speak(utterance);
+                });
+            };
+
+            const handleStatusCheck = () => {
+                if (isSpeaking) return;
+                const currentProgress = isAdminOpen ? (debugProgress / 100) * TOTAL_SECONDS : elapsedSeconds;
+                const hoursElapsed = currentProgress / 3600;
+                let message = "";
+
+                if (currentProgress >= TOTAL_SECONDS) {
+                    message = "Patrick, you were a Super Sleeper! You have finished all nine hours of sleep. You can get up now and start your day whenever you are ready.";
+                } else if (hoursElapsed >= 8) {
+                    message = "Patrick, you have slept for a very long time! You are almost finished. Go to the bathroom if you need to, and then see if you can sleep for just a tiny bit more.";
+                } else if (hoursElapsed >= 6) {
+                    message = "Patrick, it is almost morning, but not quite yet. You are doing a great job sleeping. Go to the bathroom if you need to, and then try to sleep a little bit longer.";
+                } else if (hoursElapsed >= 3) {
+                    message = "Patrick, you have been sleeping for a while, but the moon is still out. Go to the bathroom if you need to, and then go back to bed for more rest.";
+                } else {
+                    message = "Patrick, you just started sleeping. It is still the middle of the night. Go to the bathroom if you need to, and then go back to bed for a long sleep.";
+                }
+                speakMessage(message);
+            };
+
+            const startUnlockTimer = () => {
+                setUnlockProgress(0);
+                longPressTimer.current = setInterval(() => {
+                    setUnlockProgress(prev => {
+                        if (prev >= 100) {
+                            clearInterval(longPressTimer.current);
+                            setIsLocked(false);
+                            setIsAdminOpen(true);
+                            return 100;
+                        }
+                        return prev + 5;
+                    });
+                }, 100);
+            };
+
+            const cancelUnlockTimer = () => {
+                clearInterval(longPressTimer.current);
+                setUnlockProgress(0);
+            };
+
+            const actualProgress = Math.min((elapsedSeconds / TOTAL_SECONDS) * 100, 100);
+            const progress = isAdminOpen ? debugProgress : actualProgress;
+            const isFinished = progress >= 100;
+
+            useEffect(() => {
+                let interval = null;
+                if (isActive && !isFinished && !isAdminOpen) {
+                    interval = setInterval(() => {
+                        const now = Date.now();
+                        const secondsPassed = Math.floor((now - startTime) / 1000);
+                        setElapsedSeconds(secondsPassed);
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [isActive, startTime, isFinished, isAdminOpen]);
+
+            const handleStart = () => {
+                const tomorrow = getTomorrowDay();
+                const msg = `Good night Patrick, be a good sleeper. Tomorrow is ${tomorrow}.`;
+                setStartTime(Date.now());
+                setIsActive(true);
+                setElapsedSeconds(0);
+                setIsLocked(true);
+                setIsAdminOpen(false);
+                speakMessage(msg);
+            };
+
+            const handleReset = () => {
+                setIsActive(false);
+                setElapsedSeconds(0);
+                setStartTime(null);
+                setShowConfirmReset(false);
+                setIsAdminOpen(false);
+                setIsLocked(true);
+                if (window.speechSynthesis) window.speechSynthesis.cancel();
+            };
+
+            return (
+                <div className="fixed inset-0 flex flex-col items-center justify-center p-6 bg-slate-950 overflow-hidden">
+                    <div className="w-full max-w-4xl flex justify-between items-start mb-12">
+                        <h1 className="text-indigo-200 text-4xl font-bold leading-tight">
+                            {isFinished ? "Good Morning Patrick!" : (isActive || isAdminOpen) ? (
+                                <div className="flex items-center gap-4">
+                                    <span>Good night Patrick.<br/><span className="text-slate-400 text-2xl">Tomorrow is {getTomorrowDay()}.</span></span>
+                                    {isSpeaking && <VolumeIcon size={40} className="text-indigo-400 animate-bounce" />}
+                                </div>
+                            ) : "Ready for Bed, Patrick?"}
+                        </h1>
+                        {isActive && (!isLocked || isFinished) && (
+                            <button onClick={() => setShowConfirmReset(true)} className="p-4 rounded-full bg-slate-900/50 text-slate-600 hover:text-slate-400"><SquareIcon size={24} fill="currentColor" /></button>
+                        )}
+                    </div>
+
+                    <div className="w-full max-w-4xl relative">
+                        <div className="flex justify-between items-end mb-6 px-2">
+                            <MoonIcon size={100} className={`transition-all duration-1000 ${(isActive || isAdminOpen) ? 'scale-110 opacity-100' : 'opacity-20'} text-indigo-300`} />
+                            <SunIcon size={120} className={`transition-all duration-1000 ${isFinished ? 'scale-150 opacity-100' : 'opacity-10'} text-yellow-300`} fill={isFinished ? "currentColor" : "none"} />
+                        </div>
+                        <div className="h-32 w-full bg-slate-900 rounded-[40px] border-4 border-slate-800 p-2 relative overflow-hidden shadow-inner">
+                            <div className="h-full rounded-[32px] transition-all duration-1000 ease-linear" style={{ width: `${progress}%`, background: `linear-gradient(90deg, #1e1b4b 0%, #4338ca 50%, #fbbf24 100%)`, boxShadow: progress > 0 ? '0 0 30px rgba(67, 56, 202, 0.5)' : 'none' }}>
+                                {(isActive || isAdminOpen) && !isFinished && progress > 2 && <div className="h-full w-4 bg-white/20 float-right rounded-full animate-pulse mr-2" />}
+                            </div>
+                            {isFinished && <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white font-black text-3xl tracking-widest uppercase text-center px-4">Time to get up</div>}
+                        </div>
+                        <div className="flex justify-between mt-6 text-slate-600 font-bold text-xl uppercase tracking-widest px-4 opacity-50"><span>Bedtime</span><span>Morning</span></div>
+                    </div>
+
+                    <div className="mt-16 flex flex-col items-center gap-8">
+                        {!isActive && !isFinished && !isAdminOpen && (
+                            <button onClick={handleStart} className="flex flex-col items-center gap-6 group">
+                                <div className="w-40 h-40 rounded-full bg-indigo-600 flex items-center justify-center text-white shadow-[0_0_60px_rgba(79,70,229,0.4)] group-hover:bg-indigo-500"><PlayIcon size={64} fill="currentColor" className="ml-3" /></div>
+                                <span className="text-indigo-300 font-bold text-2xl tracking-[0.2em] uppercase">Start Sleep</span>
+                            </button>
+                        )}
+                        {(isActive || isAdminOpen) && !isFinished && (
+                            <button onClick={handleStatusCheck} disabled={isSpeaking} className="flex flex-col items-center gap-4 group transition-transform active:scale-95">
+                                <div className="w-40 h-40 rounded-[40px] bg-slate-900 border-4 border-slate-800 flex items-center justify-center text-indigo-400 shadow-xl group-hover:bg-slate-800"><InfoIcon size={80} className={isSpeaking ? "animate-pulse" : ""} /></div>
+                                <span className="text-indigo-400 font-bold text-2xl uppercase tracking-widest">Am I done?</span>
+                            </button>
+                        )}
+                        {isFinished && <button onClick={handleReset} className="px-16 py-8 rounded-full bg-yellow-500 text-slate-950 font-black text-3xl shadow-2xl">RESET FOR TOMORROW</button>}
+                    </div>
+
+                    <div className="absolute bottom-6 right-6">
+                        {!isAdminOpen ? (
+                            <div className="relative">
+                                {unlockProgress > 0 && <svg className="absolute inset-0 -rotate-90 pointer-events-none" viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" fill="none" stroke="#6366f1" strokeWidth="4" strokeDasharray={`${unlockProgress * 1.13} 113`} className="transition-all duration-100" /></svg>}
+                                <button onMouseDown={startUnlockTimer} onMouseUp={cancelUnlockTimer} onMouseLeave={cancelUnlockTimer} onTouchStart={startUnlockTimer} onTouchEnd={cancelUnlockTimer} className={`p-3 transition-colors ${unlockProgress > 0 ? 'text-indigo-400' : 'text-slate-800'}`}>{isLocked && isActive ? <LockIcon size={20} /> : <SettingsIcon size={20} />}</button>
+                            </div>
+                        ) : (
+                            <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl flex flex-col gap-6 min-w-[320px]">
+                                <div className="flex justify-between items-center"><span className="text-indigo-400 font-bold text-sm uppercase">Parent Controls</span><button onClick={() => { setIsAdminOpen(false); setIsLocked(true); }} className="text-slate-500 hover:text-white"><LockIcon size={24} /></button></div>
+                                <div className="space-y-2"><div className="flex justify-between text-xs text-slate-400 px-1"><span>Check visuals:</span><span>{debugProgress}%</span></div><input type="range" min="0" max="100" value={debugProgress} onChange={(e) => setDebugProgress(parseInt(e.target.value))} className="w-full h-3 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" /></div>
+                                <div className="grid grid-cols-4 gap-2">{[25, 50, 75, 100].map(val => <button key={val} onClick={() => setDebugProgress(val)} className={`py-2 rounded-xl text-sm font-bold ${debugProgress === val ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>{val}%</button>)}</div>
+                                <button onClick={handleStatusCheck} className="py-3 bg-indigo-900/40 text-indigo-300 rounded-xl text-sm font-bold border border-indigo-800 flex items-center justify-center gap-2">Test Current Message</button>
+                                <button onClick={handleReset} className="py-3 bg-red-900/20 text-red-400 rounded-xl text-sm font-bold border border-red-900/40">Emergency Reset</button>
+                            </div>
+                        )}
+                    </div>
+
+                    {showConfirmReset && (
+                        <div className="fixed inset-0 bg-slate-950/95 flex items-center justify-center z-50 p-6 backdrop-blur-sm">
+                            <div className="bg-slate-900 p-10 rounded-[40px] border-2 border-slate-800 max-w-md w-full text-center shadow-2xl">
+                                <h2 className="text-3xl text-white font-bold mb-8">Reset the timer?</h2>
+                                <div className="flex flex-col gap-4">
+                                    <button onClick={handleReset} className="w-full py-6 bg-red-600 text-white font-black text-xl rounded-3xl">YES, RESET</button>
+                                    <button onClick={() => setShowConfirmReset(false)} className="w-full py-6 bg-slate-800 text-slate-300 font-bold text-xl rounded-3xl">NO, KEEP SLEEPING</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
